@@ -68,9 +68,9 @@ let readStringArray (fileId:int64) (datasetPath:string) (recordLength:int) =
         | :? Exception as ex -> false, Array.zeroCreate<string> 0
 
 
-let read_dataset (hdf5file:int64) (dsname:string) =
+let read_dataset (dataSetID:int64) (dsname:string) =
     printfn "1"
-    let mutable dsID                = H5D.``open``(hdf5file, dsname, H5P.DEFAULT)
+    let mutable dsID                = H5D.``open``(dataSetID, dsname, H5P.DEFAULT)
     let mutable spaceID             = H5D.get_space(dsID)
     let mutable typeID              = H5D.get_type(dsID)
     let mutable rank                = H5S.get_simple_extent_ndims(spaceID)
@@ -125,8 +125,8 @@ let directory = __SOURCE_DIRECTORY__
 let stormPath       = directory + "/HDF5Files/storm.h5"
 let experimentPath  = directory + "/HDF5Files/Experiment_1.mz5"
 
-H5.``open``()
-H5F.is_hdf5(stormPath)
+//H5.``open``()
+//H5F.is_hdf5(stormPath)
 //let fileId = H5F.``open``(stormPath, H5F.ACC_RDONLY)
 //let rootId = H5G.``open``(fileId, "/")
 
@@ -146,23 +146,60 @@ H5F.is_hdf5(stormPath)
 
 //getDataSetNames()
 
-//let getMz5ID (path:string) =
-//    H5.``open``()       |> ignore
-//    if H5F.is_hdf5(path) = 1 then
-//        H5F.``open``(path, H5F.ACC_RDONLY)
-//    else
-//        failwith "File is no HDF5 file"
+let getMz5ID (path:string) =
+    H5.``open``()       |> ignore
+    if H5F.is_hdf5(path) = 1 then
+        H5F.``open``(path, H5F.ACC_RDONLY)
+    else
+        failwith "File is no HDF5 file"
 
-//let getDataSetID (fileID:int64) (dateSet:string) =
-//    H5D.``open``(fileID, dateSet)
+let getDataSetID (fileID:int64) (dateSet:string) =
+    H5D.``open``(fileID, dateSet)
 
-//let checkForObjectType (dataSetID:int64) (dateSet:string) =
-//    let mutable gInfo = new H5O.info_t()
-//    H5O.get_info_by_name(dataSetID, dateSet, &gInfo) |> ignore
-//    gInfo.``type``
+let checkForObjectType (dataSetID:int64) (dateSet:string) =
+    let mutable gInfo = new H5O.info_t()
+    H5O.get_info_by_name(dataSetID, dateSet, &gInfo) |> ignore
+    gInfo.``type``
 
 //let mz5ID = getMz5ID experimentPath
 
 //let cvParamID = getDataSetID mz5ID "/CVParam"
  
 //let cvParamType = checkForObjectType cvParamID "/CVParam"
+
+let fileID = getMz5ID stormPath
+
+let stormID = getDataSetID fileID "/Data/Storm"
+ 
+let dataSetType = checkForObjectType stormID "/Data/Storm"
+
+let getDataOfDataSet (fileID:int64) (dsName:string) =
+    let dataSetID           = H5D.``open``(fileID, dsName, H5P.DEFAULT)
+    let spaceID             = H5D.get_space(dataSetID)
+    let typeID              = H5D.get_type(dataSetID)
+    let rank                = H5S.get_simple_extent_ndims(spaceID)
+    let dims                = Array.zeroCreate<UInt64>(rank - 1)
+    let maxDims             = Array.zeroCreate<UInt64>(rank - 1)
+
+    H5S.get_simple_extent_dims(spaceID, dims, maxDims) |> ignore
+
+    let sizeData            = H5T.get_size(typeID)
+    let size                = sizeData.ToInt32()
+    let byteArrayElements   =
+        dims
+        |> Array.fold (fun length item -> length * item) 1uL
+    let dataBytes = Array.zeroCreate<Byte> (Convert.ToInt32(byteArrayElements) * size)
+    let pinnedArray = GCHandle.Alloc(dataBytes, GCHandleType.Pinned)
+    let tmp = pinnedArray.AddrOfPinnedObject()
+    printfn "%A" tmp
+    H5D.read(dataSetID, typeID, int64 H5S.ALL, int64 H5S.ALL, H5P.DEFAULT, tmp-1n) |> ignore
+    pinnedArray.Free()
+    seq
+        {
+            for i = 0uL to byteArrayElements - 1uL do
+                let slice = Array.take size (Array.skip (int32 i * size) dataBytes)
+                yield BitConverter.ToInt32(slice, 0)
+        }
+
+(getDataOfDataSet stormID "/Data/Storm")
+
