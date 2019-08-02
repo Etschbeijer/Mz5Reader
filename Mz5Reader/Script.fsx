@@ -147,7 +147,19 @@ let byteToSingleArray (byteArray: byte[]) =
     Buffer.BlockCopy (byteArray, 0, singles, 0, byteArray.Length)
     singles
 
-let getDataOfDataSet (fileID:int64) (dsName:string) (bitConverter:byte[]->'T) =
+let byteToStringArray (byteArray: byte[]) = 
+    System.Text.Encoding.ASCII.GetString(byteArray)
+
+let windowedArray  (windowSize:int32) (vector:'a[]) =
+    let rec loop acc n =
+        if n < vector.Length then
+            loop (Array.take windowSize (Array.skip n vector)::acc) (n+windowSize)
+        else
+            List.rev acc
+            |> Array.ofList
+    loop List.empty 0
+
+let getAllDataOfDataSet (fileID:int64) (dsName:string) (bitConverter:byte[]->'T) =
     let dataSetID           = H5D.``open``(fileID, dsName, H5P.DEFAULT)
     let spaceID             = H5D.get_space(dataSetID)
     let typeID              = H5D.get_type(dataSetID)
@@ -165,21 +177,40 @@ let getDataOfDataSet (fileID:int64) (dsName:string) (bitConverter:byte[]->'T) =
     let pinnedArray = GCHandle.Alloc(dataBytes, GCHandleType.Pinned)
     H5D.read(dataSetID, typeID, int64 H5S.ALL, int64 H5S.ALL, H5P.DEFAULT, pinnedArray.AddrOfPinnedObject()) |> ignore
     pinnedArray.Free()
-    let finalSet = Array2D.zeroCreate<Int32> (Convert.ToInt32(dims.[0])) (Convert.ToInt32(dims.[1]))
-    (bitConverter dataBytes)
-
-let test = (getDataOfDataSet stormID "/Data/Storm" byteToSingleArray)
-
-let windowedArray (vector:'a[]) (windowSize:int32) =
-    let rec loop acc n =
-        if n < vector.Length then
-            loop (Array.take windowSize (Array.skip n vector)::acc) (n+windowSize)
-        else
-            List.rev acc
-            |> Array.ofList
-            |> array2D
-    loop List.empty 0
+    bitConverter dataBytes
     
+let test = (getAllDataOfDataSet stormID "/Data/Storm" byteToSingleArray)
+windowedArray 57 test
 
-windowedArray test 57
+let getSpecificDataOfDataSet (fileID:int64) (dsName:string) (bitConverter:byte[]->'T) =
+    let dataSetID           = H5D.``open``(fileID, dsName, H5P.DEFAULT)
+    let spaceID             = H5D.get_space(dataSetID)
+    let typeID              = H5D.get_type(dataSetID)
+    let rank                = H5S.get_simple_extent_ndims(spaceID)
+    let dims                = Array.zeroCreate<UInt64>(rank)
+    let maxDims             = Array.zeroCreate<UInt64>(rank)
+    let spaceID             = H5D.get_space(dataSetID)
+    H5S.get_simple_extent_dims(spaceID, dims, maxDims) |> ignore
+    let sizeData            = H5T.get_size(typeID)
+    let size                = sizeData.ToInt32()
+    let byteArrayElements   = dims.[0]
+    let dataBytes   = Array.zeroCreate<Byte> (Convert.ToInt32(byteArrayElements) * size)
+    let pinnedArray = GCHandle.Alloc(dataBytes, GCHandleType.Pinned)
+    let start   = [|Convert.ToUInt64(0); Convert.ToUInt64(0)|]
+    let count   = [|Convert.ToUInt64(0); Convert.ToUInt64(57)|]
+    let stride  = [|Convert.ToUInt64(1); Convert.ToUInt64(1)|]
+    let block   = [|Convert.ToUInt64(1); Convert.ToUInt64(1)|]
+
+    let dataSpaceID = H5S.select_hyperslab(spaceID, H5S.seloper_t.AND, start, stride, count, block)
+
+    //let memoryID = H5S.create(H5S.class_t.SIMPLE)
+    //H5D.read(dataSetID, typeID, memoryID, int64 dataSpaceID, H5P.DEFAULT, pinnedArray.AddrOfPinnedObject()) |> ignore    
+    //pinnedArray.Free()
+    //bitConverter dataBytes
+    dataSpaceID
+
+//(getSpecificDataOfDataSet stormID "/Data/Storm" byteToSingleArray)
+
+let testII = (getSpecificDataOfDataSet stormID "/Data/Storm" byteToSingleArray)
+
 
