@@ -5,6 +5,7 @@
 
 open System
 open System.Runtime.InteropServices
+open HDF
 open HDF.PInvoke
 
 
@@ -66,38 +67,6 @@ let readStringArray (fileId:int64) (datasetPath:string) (recordLength:int) =
         true, datasetOut
     with
         | :? Exception as ex -> false, Array.zeroCreate<string> 0
-
-
-let read_dataset (dataSetID:int64) (dsname:string) =
-    printfn "1"
-    let mutable dsID                = H5D.``open``(dataSetID, dsname, H5P.DEFAULT)
-    let mutable spaceID             = H5D.get_space(dsID)
-    let mutable typeID              = H5D.get_type(dsID)
-    let mutable rank                = H5S.get_simple_extent_ndims(spaceID)
-    let mutable dims                = Array.zeroCreate<UInt64>(rank - 1)
-    let mutable maxDims             = Array.zeroCreate<UInt64>(rank - 1)
-    H5S.get_simple_extent_dims(spaceID, dims, maxDims) |> ignore
-    let mutable sizeData            = H5T.get_size(typeID)
-    let mutable size                = sizeData.ToInt32()
-    let mutable bytearray_elements  = 1uL
-    printfn "2"
-    for i = 0 to dims.Length - 1 do
-        bytearray_elements <- (Convert.ToUInt64(bytearray_elements))*dims.[i]
-    printfn "3"
-    let dataBytes = Convert.ToByte(Convert.ToInt32(bytearray_elements) * size)
-    printfn "4"
-    let pinnedArray = GCHandle.Alloc(dataBytes, GCHandleType.Pinned)
-    printfn "5"
-    H5D.read(dsID, typeID, int64 H5S.ALL, int64 H5S.ALL, H5P.DEFAULT, pinnedArray.AddrOfPinnedObject()) |> ignore
-    printfn "6"
-    pinnedArray.Free()
-    printfn "7"
-    //seq
-    //    {
-    //        for i = 0uL to bytearray_elements - 1uL do
-    //            let slice = Array.take size (Array.skip (int32 i * size) dataBytes)
-    //            yield BitConverter.ToInt32(slice, 0)
-    //    }
 
 let iterate(objectId:int64) (namePtr:IntPtr) (info:byref<H5O.info_t>) (op_data:IntPtr) =
     let mutable (objectName:string) = Marshal.PtrToStringAnsi(namePtr)
@@ -161,7 +130,7 @@ let checkForObjectType (dataSetID:int64) (dateSet:string) =
     H5O.get_info_by_name(dataSetID, dateSet, &gInfo) |> ignore
     gInfo.``type``
 
-//let mz5ID = getMz5ID experimentPath
+let mz5ID = getMz5ID experimentPath
 
 //let cvParamID = getDataSetID mz5ID "/CVParam"
  
@@ -173,33 +142,44 @@ let stormID = getDataSetID fileID "/Data/Storm"
  
 let dataSetType = checkForObjectType stormID "/Data/Storm"
 
-let getDataOfDataSet (fileID:int64) (dsName:string) =
+let byteToSingleArray (byteArray: byte[]) = 
+    let singles = Array.zeroCreate<Int32> (byteArray.Length/4)
+    Buffer.BlockCopy (byteArray, 0, singles, 0, byteArray.Length)
+    singles
+
+let getDataOfDataSet (fileID:int64) (dsName:string) (bitConverter:byte[]->'T) =
     let dataSetID           = H5D.``open``(fileID, dsName, H5P.DEFAULT)
     let spaceID             = H5D.get_space(dataSetID)
     let typeID              = H5D.get_type(dataSetID)
     let rank                = H5S.get_simple_extent_ndims(spaceID)
-    let dims                = Array.zeroCreate<UInt64>(rank - 1)
-    let maxDims             = Array.zeroCreate<UInt64>(rank - 1)
-
+    let dims                = Array.zeroCreate<UInt64>(rank)
+    let maxDims             = Array.zeroCreate<UInt64>(rank)
+    let spaceID             = H5D.get_space(dataSetID)
     H5S.get_simple_extent_dims(spaceID, dims, maxDims) |> ignore
-
     let sizeData            = H5T.get_size(typeID)
     let size                = sizeData.ToInt32()
     let byteArrayElements   =
         dims
         |> Array.fold (fun length item -> length * item) 1uL
-    let dataBytes = Array.zeroCreate<Byte> (Convert.ToInt32(byteArrayElements) * size)
+    let dataBytes   = Array.zeroCreate<Byte> (Convert.ToInt32(byteArrayElements) * size)
     let pinnedArray = GCHandle.Alloc(dataBytes, GCHandleType.Pinned)
-    let tmp = pinnedArray.AddrOfPinnedObject()
-    printfn "%A" tmp
-    H5D.read(dataSetID, typeID, int64 H5S.ALL, int64 H5S.ALL, H5P.DEFAULT, tmp-1n) |> ignore
+    H5D.read(dataSetID, typeID, int64 H5S.ALL, int64 H5S.ALL, H5P.DEFAULT, pinnedArray.AddrOfPinnedObject()) |> ignore
     pinnedArray.Free()
-    seq
-        {
-            for i = 0uL to byteArrayElements - 1uL do
-                let slice = Array.take size (Array.skip (int32 i * size) dataBytes)
-                yield BitConverter.ToInt32(slice, 0)
-        }
+    let finalSet = Array2D.zeroCreate<Int32> (Convert.ToInt32(dims.[0])) (Convert.ToInt32(dims.[1]))
+    (bitConverter dataBytes)
 
-(getDataOfDataSet stormID "/Data/Storm")
+let test = (getDataOfDataSet stormID "/Data/Storm" byteToSingleArray)
+
+let windowedArray (vector:'a[]) (windowSize:int32) =
+    let rec loop acc n =
+        if n < vector.Length then
+            loop (Array.take windowSize (Array.skip n vector)::acc) (n+windowSize)
+        else
+            List.rev acc
+            |> Array.ofList
+            |> array2D
+    loop List.empty 0
+    
+
+windowedArray test 57
 
