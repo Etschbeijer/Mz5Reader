@@ -49,6 +49,8 @@
     <Content Include="packages.config" />
     <None Include="HDF5Files\Experiment_1.mz5" />
     <None Include="HDF5Files\storm.h5" />
+    <Content Include="HDF5Files\tiny.pwiz.1.1.txt" />
+    <None Include="HDF5Files\h5ex_t_cmpd-1.c" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="FSharp.Core">
