@@ -101,7 +101,7 @@ let experimentPath  = directory + "/HDF5Files/Experiment_1.mz5"
 
 //let del1 = new Delegate1(fun objectId namePtr info op_data -> (iterate objectId namePtr (&info) op_data))   
    
-//let getDataSetNames() =
+//let getDataSetNames(fileId) =
 //    H5O.visit(fileId, H5.index_t.NAME, H5.iter_order_t.INC, new H5O.iterate_t((fun objectId namePtr info op_data -> invokeDelegate del1 objectId namePtr (&info) op_data)), new IntPtr())
      
 //H5G.close(rootId)
@@ -183,6 +183,7 @@ let test = (getAllDataOfDataSet stormID "/Data/Storm" byteToSingleArray)
 windowedArray 57 test
 
 let getSpecificDataOfDataSet (fileID:int64) (dsName:string) (bitConverter:byte[]->'T) =
+
     let dataSetID           = H5D.``open``(fileID, dsName, H5P.DEFAULT)
     let spaceID             = H5D.get_space(dataSetID)
     let typeID              = H5D.get_type(dataSetID)
@@ -190,27 +191,38 @@ let getSpecificDataOfDataSet (fileID:int64) (dsName:string) (bitConverter:byte[]
     let dims                = Array.zeroCreate<UInt64>(rank)
     let maxDims             = Array.zeroCreate<UInt64>(rank)
     let spaceID             = H5D.get_space(dataSetID)
+
     H5S.get_simple_extent_dims(spaceID, dims, maxDims) |> ignore
+
     let sizeData            = H5T.get_size(typeID)
-    let size                = sizeData.ToInt32()
-    let byteArrayElements   = dims.[0]
-    let dataBytes   = Array.zeroCreate<Byte> (Convert.ToInt32(byteArrayElements) * size)
-    let pinnedArray = GCHandle.Alloc(dataBytes, GCHandleType.Pinned)
-    let start   = [|Convert.ToUInt64(0); Convert.ToUInt64(0)|]
-    let count   = [|Convert.ToUInt64(0); Convert.ToUInt64(57)|]
+    //let size                = sizeData.ToInt32()
+    //let byteArrayElements   = 
+    //    //Convert.ToUInt64(dims.[0])
+    //    dims
+    //    |> Array.fold (fun length item -> length * item) 1uL
+    //let dataBytes   = Array.zeroCreate<Byte> (Convert.ToInt32(byteArrayElements) * size)
+    let rData = Array.zeroCreate<Byte> 48
+    let pinnedArray = GCHandle.Alloc(rData, GCHandleType.Pinned)
+
+    let start   = [|Convert.ToUInt64(1); Convert.ToUInt64(2)|]
+    let count   = [|Convert.ToUInt64(3); Convert.ToUInt64(4)|]
     let stride  = [|Convert.ToUInt64(1); Convert.ToUInt64(1)|]
-    let block   = [|Convert.ToUInt64(1); Convert.ToUInt64(1)|]
+    let block   = [|Convert.ToUInt64(1); Convert.ToUInt64(1)|]    
 
-    let dataSpaceID = H5S.select_hyperslab(spaceID, H5S.seloper_t.AND, start, stride, count, block)
+    let memoryID = H5S.create_simple(rank, dims, null)
+    let status = H5S.select_hyperslab(spaceID, H5S.seloper_t.SET, start, stride, count, block)
 
-    //let memoryID = H5S.create(H5S.class_t.SIMPLE)
-    //H5D.read(dataSetID, typeID, memoryID, int64 dataSpaceID, H5P.DEFAULT, pinnedArray.AddrOfPinnedObject()) |> ignore    
-    //pinnedArray.Free()
-    //bitConverter dataBytes
-    dataSpaceID
+    H5D.write(dataSetID, typeID, memoryID, spaceID, H5P.DEFAULT, pinnedArray.AddrOfPinnedObject()) |> ignore    
+    H5D.read(dataSetID, typeID, int64 H5S.ALL, int64 H5S.ALL, H5P.DEFAULT, pinnedArray.AddrOfPinnedObject()) |> ignore   
+    
+    pinnedArray.Free()
+    bitConverter rData
+    
+    
+    
 
 //(getSpecificDataOfDataSet stormID "/Data/Storm" byteToSingleArray)
 
 let testII = (getSpecificDataOfDataSet stormID "/Data/Storm" byteToSingleArray)
 
-
+testII
