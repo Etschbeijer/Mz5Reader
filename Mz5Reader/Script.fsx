@@ -191,15 +191,17 @@ let createCvParam value cvRefID uRefID =
         CvParam.URefID  = uRefID 
     }
 
-[<StructLayout(LayoutKind.Explicit)>]
+//[<StructLayout(LayoutKind.Explicit)>]
+[<Struct>]
 type CVParam =
     struct
-        [<FieldOffset(0)>]
-        val mutable Value   : string
-        [<FieldOffset(127)>]
-        val mutable CvRefID : UInt32
-        [<FieldOffset(131)>]
-        val mutable URefID  : UInt32
+        //[<FieldOffset(0)>]
+        val mutable value   : string
+        //[<FieldOffset(128)>]
+        val mutable cvRefID : UInt32
+        //[<FieldOffset(132)>]
+        val mutable uRefID  : UInt32
+        //new(value, cvRefID, uRefID) = {value=value; cvRefID=cvRefID; uRefID=uRefID}
     end
  
 
@@ -256,12 +258,13 @@ let buildCvParam (bytes:Byte[]) (size:int) =
 
 let getDataOfDataSet<'T> (path:string) (dsName:string) =
 
-    let fileID      =
+    let fileID =
         H5.``open``()   |> ignore
         if H5F.is_hdf5(path) = 1 then
             H5F.``open``(path, H5F.ACC_RDONLY)
         else
             failwith "File is no HDF5 file"
+
     let dataSetID   = H5D.``open``(fileID, dsName, H5P.DEFAULT)
     let spaceID     = H5D.get_space(dataSetID)
     //let typeID      = H5D.get_type(dataSetID)
@@ -271,36 +274,33 @@ let getDataOfDataSet<'T> (path:string) (dsName:string) =
 
     let nDims = H5S.get_simple_extent_dims(spaceID, dims, maxDims)
 
-    //let sizeData            = H5T.get_size(typeID)
-    //let size                = sizeData.ToInt32()
     let byteArrayElements   =
         dims
         |> Array.fold (fun length item -> length * item) 1uL
-    let dataBytes       = Array.zeroCreate<'T> ((int byteArrayElements) * (sizeof<'T>))
+    let dataBytes       = Array.zeroCreate<'T> ((int byteArrayElements) (** (sizeof<'T>)*))
 
-    let nativeID        = System.Runtime.InteropServices.Marshal.UnsafeAddrOfPinnedArrayElement(dataBytes,0)
+    let nativeID        = System.Runtime.InteropServices.Marshal.UnsafeAddrOfPinnedArrayElement(dataBytes, 0)
+    
     let intptr          = new System.IntPtr(nativeID.ToPointer())
-    //let pinnedArray     = GCHandle.Alloc(dataBytes, GCHandleType.Pinned)
-
+    //printfn "sizeof %i" (124 + sizeof<'T>)
     let compoundTypeID  = H5T.create(H5T.class_t.COMPOUND, nativeint(sizeof<'T>))
-    //let changeA pointer newA =
-    //    let mutable (structure:CVParam) = FSharp.NativeInterop.NativePtr.read pointer
-    //    structure.Value <- newA
-    //    FSharp.NativeInterop.NativePtr.write pointer structure
-    let insertValue     = H5T.insert(compoundTypeID, "value"    , 0n    , H5T.C_S1)
-    let insertValue     = H5T.insert(compoundTypeID, "cvrefID"  , 127n  , H5T.NATIVE_UINT32)
-    let insertValue     = H5T.insert(compoundTypeID, "urefID"   , 0n    , H5T.NATIVE_UINT32)
+    
+    let sizeData    = H5T.get_size(compoundTypeID)
+    let size        = sizeData.ToInt32()
+    printfn "size %i" size
 
-    let readStatus  = H5D.read(dataSetID, compoundTypeID, int64 H5S.ALL, int64 H5S.ALL, H5P.DEFAULT, nativeID)
+    let insertValue     = H5T.insert(compoundTypeID, "value"  , Marshal.OffsetOf<CVParam>("value")  ,   H5T.C_S1)
+    let insertCvRefID   = H5T.insert(compoundTypeID, "cvRefID", Marshal.OffsetOf<CVParam>("cvRefID"),   H5T.NATIVE_UINT32)
+    let insertURefID    = H5T.insert(compoundTypeID, "uRefID" , Marshal.OffsetOf<CVParam>("uRefID") ,   H5T.NATIVE_UINT32)
+
+    let readStatus  = H5D.read(dataSetID, compoundTypeID, int64 H5S.ALL, int64 H5S.ALL, H5P.DEFAULT, intptr)
     printfn "%A readStatus" readStatus
     
-    //let cvParams = Array.zeroCreate<CvParam> (dataBytes.Length/size)
-    
-    let reclaimStatus   = H5D.vlen_reclaim(compoundTypeID, spaceID, H5P.DEFAULT, nativeID)
+    let reclaimStatus   = H5D.vlen_reclaim(compoundTypeID, spaceID, H5P.DEFAULT, intptr)
     printfn "%A reclaimStatus" reclaimStatus
     //pinnedArray.Free()
     dataBytes
-    
+
 
 let getSpecificData (path:string) (dsName:string) (start:int) (amount:int) (bitConverter:byte[]->int->'T) =
 
@@ -344,6 +344,8 @@ let getSpecificData (path:string) (dsName:string) (start:int) (amount:int) (bitC
 //(getSpecificData experimentPath "/CVParam" 0 5 buildCvParam)
 
 
-(getDataOfDataSet<CvParam> experimentPath "/CVParam")
+let test = (getDataOfDataSet<CVParam> experimentPath "/CVParam")
 
+test.[1].value
 
+//test.Length
