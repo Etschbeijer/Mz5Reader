@@ -86,10 +86,7 @@ type Delegate1 = delegate of int64*nativeint*byref<H5O.info_t>*nativeint -> int
 
 let invokeDelegate (dlg:Delegate1) (objectId:int64) (namePtr:IntPtr) (info:byref<H5O.info_t>) (op_data:IntPtr) =
     dlg.Invoke(objectId, namePtr, &info, op_data)
-
-
-
-
+         
 
 let directory = __SOURCE_DIRECTORY__
 let stormPath       = directory + "/HDF5Files/storm.h5"
@@ -191,19 +188,18 @@ let createCvParam value cvRefID uRefID =
         CvParam.URefID  = uRefID 
     }
 
-//[<StructLayout(LayoutKind.Explicit)>]
+[<StructLayout(LayoutKind.Explicit)>]
+//[<StructLayout(LayoutKind.Sequential)>]
 [<Struct>]
 type CVParam =
     struct
-        //[<FieldOffset(0)>]
-        val mutable value   : string
-        //[<FieldOffset(128)>]
+        [<FieldOffset(0)>]
+        val mutable value   : byte[]
+        [<FieldOffset(128)>]
         val mutable cvRefID : UInt32
-        //[<FieldOffset(132)>]
+        [<FieldOffset(132)>]
         val mutable uRefID  : UInt32
-        //new(value, cvRefID, uRefID) = {value=value; cvRefID=cvRefID; uRefID=uRefID}
-    end
- 
+    end 
 
 //type SpectrumMetaData =
 //    {
@@ -256,51 +252,7 @@ let buildCvParam (bytes:Byte[]) (size:int) =
 
 #nowarn "9"
 
-let getDataOfDataSet<'T> (path:string) (dsName:string) =
-
-    let fileID =
-        H5.``open``()   |> ignore
-        if H5F.is_hdf5(path) = 1 then
-            H5F.``open``(path, H5F.ACC_RDONLY)
-        else
-            failwith "File is no HDF5 file"
-
-    let dataSetID   = H5D.``open``(fileID, dsName, H5P.DEFAULT)
-    let spaceID     = H5D.get_space(dataSetID)
-    //let typeID      = H5D.get_type(dataSetID)
-    let rank        = H5S.get_simple_extent_ndims(spaceID)
-    let dims        = Array.zeroCreate<UInt64>(rank)
-    let maxDims     = Array.zeroCreate<UInt64>(rank)    
-
-    let nDims = H5S.get_simple_extent_dims(spaceID, dims, maxDims)
-
-    let byteArrayElements   =
-        dims
-        |> Array.fold (fun length item -> length * item) 1uL
-    let dataBytes       = Array.zeroCreate<'T> ((int byteArrayElements) (** (sizeof<'T>)*))
-
-    let nativeID        = System.Runtime.InteropServices.Marshal.UnsafeAddrOfPinnedArrayElement(dataBytes, 0)
-    
-    let intptr          = new System.IntPtr(nativeID.ToPointer())
-    //printfn "sizeof %i" (124 + sizeof<'T>)
-    let compoundTypeID  = H5T.create(H5T.class_t.COMPOUND, nativeint(sizeof<'T>))
-    
-    let sizeData    = H5T.get_size(compoundTypeID)
-    let size        = sizeData.ToInt32()
-    printfn "size %i" size
-
-    let insertValue     = H5T.insert(compoundTypeID, "value"  , Marshal.OffsetOf<CVParam>("value")  ,   H5T.C_S1)
-    let insertCvRefID   = H5T.insert(compoundTypeID, "cvRefID", Marshal.OffsetOf<CVParam>("cvRefID"),   H5T.NATIVE_UINT32)
-    let insertURefID    = H5T.insert(compoundTypeID, "uRefID" , Marshal.OffsetOf<CVParam>("uRefID") ,   H5T.NATIVE_UINT32)
-
-    let readStatus  = H5D.read(dataSetID, compoundTypeID, int64 H5S.ALL, int64 H5S.ALL, H5P.DEFAULT, intptr)
-    printfn "%A readStatus" readStatus
-    
-    let reclaimStatus   = H5D.vlen_reclaim(compoundTypeID, spaceID, H5P.DEFAULT, intptr)
-    printfn "%A reclaimStatus" reclaimStatus
-    //pinnedArray.Free()
-    dataBytes
-
+open System.Text
 
 let getSpecificData (path:string) (dsName:string) (start:int) (amount:int) (bitConverter:byte[]->int->'T) =
 
@@ -340,12 +292,85 @@ let getSpecificData (path:string) (dsName:string) (start:int) (amount:int) (bitC
     bitConverter dataBytes size
 
 
-    
-//(getSpecificData experimentPath "/CVParam" 0 5 buildCvParam)
+let getDataOfDataSet<'T> (path:string) (dsName:string) =
 
+    let fileID =
+        H5.``open``()   |> ignore
+        if H5F.is_hdf5(path) = 1 then
+            H5F.``open``(path, H5F.ACC_RDONLY)
+        else
+            failwith "File is no HDF5 file"
+
+    let dataSetID   = H5D.``open``(fileID, dsName, H5P.DEFAULT)
+    let spaceID     = H5D.get_space(dataSetID)
+    //let typeID      = H5D.get_type(dataSetID)
+    let rank        = H5S.get_simple_extent_ndims(spaceID)
+    let dims        = Array.zeroCreate<UInt64>(rank)
+    let maxDims     = Array.zeroCreate<UInt64>(rank)    
+
+    let nDims = H5S.get_simple_extent_dims(spaceID, dims, maxDims)
+
+    let byteArrayElements   =
+        dims
+        |> Array.fold (fun length item -> length * item) 1uL
+    let dataBytes       = Array.zeroCreate<'T> ((int byteArrayElements) (** 136*))    
+
+    let sType           = H5T.copy(H5T.C_S1)
+    let sPaddingStatus  = H5T.set_strpad(sType, H5T.str_t.NULLTERM)
+    let sCSetStatus     = H5T.set_cset(sType, H5T.cset_t.ASCII)    
+    let sTypeSize       = 128n
+    let setSizeSType    = H5T.set_size(sType, sTypeSize)
+
+    let cvRefIDType     = H5T.copy(H5T.NATIVE_UINT32)
+    let cvRefIDTypeSize = 4n
+    let setSizeCRIDType = H5T.set_size(cvRefIDType, cvRefIDTypeSize)
+
+    let uRefIDType      = H5T.copy(H5T.NATIVE_UINT32)
+    let uRefIDTypeSize  = 4n
+    let setSizeURIDType = H5T.set_size(uRefIDType, uRefIDTypeSize)
+
+    let nativeID        = System.Runtime.InteropServices.Marshal.UnsafeAddrOfPinnedArrayElement(dataBytes, 0)    
+    let intptr          = new System.IntPtr(nativeID.ToPointer())
+    let compoundTypeID  = H5T.create(H5T.class_t.COMPOUND, nativeint(Marshal.SizeOf<'T>()))
+    //let setSizeCompound = H5T.set_size(compoundTypeID, 136n)
+    let sizeData       = H5T.get_size(compoundTypeID)
+    let mutable sizeCompound = Convert.ToUInt64(sizeData.ToInt32())
+    
+    printfn "dataBytes %i" dataBytes.Length
+
+    printfn "total amount bytes %i" (H5D.vlen_get_buf_size(dataSetID, compoundTypeID, spaceID, &sizeCompound))
+    printfn "sizeCompound %A" sizeCompound
+
+    let offSetValue = Marshal.OffsetOf<CVParam>("value")
+    printfn "offSetValue %i" offSetValue
+    let offSetCvRefID = Marshal.OffsetOf<CVParam>("cvRefID")
+    printfn "offSetCvRefID %i" offSetCvRefID
+    let offSetURefID    = Marshal.OffsetOf<CVParam>("uRefID")
+    printfn "offSetURefID %i" offSetURefID
+
+    let insertValue     = H5T.insert(compoundTypeID, "value"  , offSetValue  ,   sType)
+    printfn "insertValue after %i" insertValue
+    let insertCvRefID   = H5T.insert(compoundTypeID, "cvRefID", offSetCvRefID,   cvRefIDType)
+    printfn "insertCvRefID after %i" insertCvRefID
+    let insertURefID    = H5T.insert(compoundTypeID, "uRefID" , offSetURefID ,   uRefIDType)    
+    printfn "insertURefID after %i" insertURefID
+
+    let readStatus  = H5D.read(dataSetID, compoundTypeID, int64 H5S.ALL, int64 H5S.ALL, H5P.DEFAULT, nativeID)
+    printfn "%A readStatus" readStatus
+    //let reclaimStatus   = H5D.vlen_reclaim(compoundTypeID, spaceID, H5P.DEFAULT, intptr)
+    //printfn "%A reclaimStatus" reclaimStatus
+    
+    //pinnedArray.Free()
+    dataBytes
 
 let test = (getDataOfDataSet<CVParam> experimentPath "/CVParam")
 
-test.[1].value
+//test.[1]
 
-//test.Length
+let testIII = getAllDataOfDataSet (H5F.``open``(experimentPath, H5F.ACC_RDONLY)) "/CVParam" buildCvParam 136
+testIII.Length
+
+let testString = "1234567890123456789012345678901234567890"
+
+System.Text.Encoding.ASCII.GetBytes("1234567890123456789012345678901234567890")
+|> Seq.length
